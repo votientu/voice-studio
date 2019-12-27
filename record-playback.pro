@@ -18,7 +18,7 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
         main.cpp \
-    myaudio.cpp
+        myaudio.cpp
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin

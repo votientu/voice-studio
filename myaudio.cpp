@@ -2,10 +2,11 @@
 
 #include <QDebug>
 
-#define SAMPLE_RATE 22050
+#define SAMPLE_RATE 44100
 #define CHANNELS 1
 #define SAMPLE_SIZE 16
 #define SAMPLE_TYPE SignedInt
+#define BUFFER_SIZE 4096
 
 MyAudio::MyAudio()
 {
@@ -61,7 +62,7 @@ MyAudio::MyAudio()
         qDebug() << "Preferred Device settings:"  << deviceInfo.preferredFormat();
     }
 
-    buff.resize(0x10000);   //create a rx buffer
+    buff.resize(BUFFER_SIZE);   //create a rx buffer
 
     pbuff=buff.data();       //get the buff address;
     RXbuff=0;                //set RX buffer pointer
@@ -83,7 +84,7 @@ qint64 MyAudio::readData(char *data, qint64 len)
     while (len > total  && RXbuff>TXbuff)//write and synchonise buffers
     {
         //write data to speaker
-        memcpy(&data[total],&pbuff[TXbuff%0x10000],2);    //copy 2 Bytes
+        memcpy(&data[total],&pbuff[TXbuff%BUFFER_SIZE],2);    //copy 2 Bytes
         TXbuff+=2; //point to next buffer 16 bit location
         total+=2;
     }
@@ -97,7 +98,7 @@ qint64 MyAudio::writeData(const char *data, qint64 len)
     int total=0;
     while (len > total)
     {
-        memcpy(&pbuff[RXbuff%0x10000],&data[total], 2); //write 2Bytes into circular buffer(64K)
+        memcpy(&pbuff[RXbuff%BUFFER_SIZE],&data[total], 2); //write 2Bytes into circular buffer(64K)
         RXbuff+=2; //next 16bit buffer location
         total+=2;  //next data location
     }
