@@ -5,104 +5,84 @@
 #define SAMPLE_RATE 44100
 #define CHANNELS 1
 #define SAMPLE_SIZE 16
+#define SAMPLE_BYTE SAMPLE_SIZE/8
 #define SAMPLE_TYPE SignedInt
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 0x10000
 
 MyAudio::MyAudio()
 {
-    formatIn.setSampleRate(SAMPLE_RATE);
-    formatIn.setChannelCount(CHANNELS);
-    formatIn.setSampleSize(SAMPLE_SIZE);
-    formatIn.setCodec("audio/pcm");
-    formatIn.setByteOrder(QAudioFormat::LittleEndian);
-    formatIn.setSampleType(QAudioFormat::SAMPLE_TYPE);
-
-    formatOut.setSampleRate(SAMPLE_RATE);
-    formatOut.setChannelCount(CHANNELS);
-    formatOut.setSampleSize(SAMPLE_SIZE);
-    formatOut.setCodec("audio/pcm");
-    formatOut.setByteOrder(QAudioFormat::LittleEndian);
-    formatOut.setSampleType(QAudioFormat::SAMPLE_TYPE);
+    format.setSampleRate(SAMPLE_RATE);
+    format.setChannelCount(CHANNELS);
+    format.setSampleSize(SAMPLE_SIZE);
+    format.setCodec("audio/pcm");
+    format.setByteOrder(QAudioFormat::LittleEndian);
+    format.setSampleType(QAudioFormat::SAMPLE_TYPE);
 
     //print out the output device setup parameters
-    QAudioDeviceInfo          deviceOut(QAudioDeviceInfo::availableDevices(QAudio::AudioOutput).at(0));     //select output device 0
-    qDebug()<<"Selected Output device ="<<deviceOut.deviceName();
+    QAudioDeviceInfo deviceOut(QAudioDeviceInfo::defaultOutputDevice());
+    qDebug() << "Selected Output device ="          << deviceOut.deviceName();
+    if (!deviceOut.isFormatSupported(format)) {
+        qWarning() << "Raw audio format not supported by output device";
+        return;
+    }
 
     //print out the input device setup parameters
-    QAudioDeviceInfo     deviceIn(QAudioDeviceInfo::availableDevices(QAudio::AudioInput).at(0));     //select output device 0
-    qDebug()<<"Selected input device ="<<deviceIn.deviceName();
+    QAudioDeviceInfo deviceIn(QAudioDeviceInfo::defaultInputDevice());
+    qDebug() << "Selected input device ="           << deviceIn.deviceName();
+    if (!deviceIn.isFormatSupported(format)) {
+        qWarning() << "Raw audio format not supported by by output device";
+        return;
+    }
 
     //configure device
-    audioOut = new QAudioOutput(deviceOut,formatOut,0);
-    audioIn  = new QAudioInput (deviceIn, formatIn,0);
+    audioOut = new QAudioOutput(deviceOut, format);
+    audioIn  = new QAudioInput(deviceIn, format);
 
-    //print out the device specifications
-    foreach(const QAudioDeviceInfo &deviceInfo, QAudioDeviceInfo::availableDevices(QAudio::AudioInput))
-    {
-        qDebug() << "\nSuported Input devices";
-        qDebug() << "\nDevice name: "             << deviceInfo.deviceName();
-        qDebug() << "Supported channel count: "   << deviceInfo.supportedChannelCounts();
-        qDebug() << "Supported Codec: "           << deviceInfo.supportedCodecs();
-        qDebug() << "Supported byte order: "      << deviceInfo.supportedByteOrders();
-        qDebug() << "Supported Sample Rate: "     << deviceInfo.supportedSampleRates();
-        qDebug() << "Supported Sample Size: "     << deviceInfo.supportedSampleSizes();
-        qDebug() << "Supported Sample Type: "     << deviceInfo.supportedSampleTypes();
-        qDebug() << "Preferred Device settings:"  << deviceInfo.preferredFormat();
-    }
-    foreach(const QAudioDeviceInfo &deviceInfo, QAudioDeviceInfo::availableDevices(QAudio::AudioOutput))
-    {
-        qDebug() << "\nSuported output devices";
-        qDebug() << "Device name: "             << deviceInfo.deviceName();
-        qDebug() << "Supported channel count: "   << deviceInfo.supportedChannelCounts();
-        qDebug() << "Supported Codec: "           << deviceInfo.supportedCodecs();
-        qDebug() << "Supported byte order: "      << deviceInfo.supportedByteOrders();
-        qDebug() << "Supported Sample Rate: "     << deviceInfo.supportedSampleRates();
-        qDebug() << "Supported Sample Size: "     << deviceInfo.supportedSampleSizes();
-        qDebug() << "Supported Sample Type: "     << deviceInfo.supportedSampleTypes();
-        qDebug() << "Preferred Device settings:"  << deviceInfo.preferredFormat();
-    }
 
-    buff.resize(BUFFER_SIZE);   //create a rx buffer
+    pbuff = new char[BUFFER_SIZE];
+    RXbuff = 0;                     // set RX buffer pointer
+    TXbuff = 0;                     // set TX buffer pointer
 
-    pbuff=buff.data();       //get the buff address;
-    RXbuff=0;                //set RX buffer pointer
+    audioOut->setVolume(1.0);       // volume 0 to 1.0
 
-    qDebug()<<"File open"<<open(QIODevice::ReadWrite);
-    qDebug()<<"is device Sequential="<<isSequential();
-    audioIn->start(this); //start reading device
-
-    audioOut->setVolume(1.0);  //volume 0 to 1.0
-    audioOut->start(this);    //start writing to device
+    qDebug() << "File open" << open(QIODevice::ReadWrite);
+    qDebug() << "is device Sequential=" << isSequential();
+    audioIn->start(this);           // start reading device
+    audioOut->start(this);          // start writing to device
 }
 
-//QIODevice Class (Protected Functions)This function is called by QIODevice.
-//send to output(Speaker)
+// rewrite a virtual function of QIODevice Class
+// send to output (Speaker)
 qint64 MyAudio::readData(char *data, qint64 len)
 {
-    static quint64 TXbuff=0;
     qint64 total = 0;
-    while (len > total  && RXbuff>TXbuff)//write and synchonise buffers
-    {
-        //write data to speaker
-        memcpy(&data[total],&pbuff[TXbuff%BUFFER_SIZE],2);    //copy 2 Bytes
-        TXbuff+=2; //point to next buffer 16 bit location
-        total+=2;
+    if (TXbuff + len < RXbuff) total = len;
+    else total = RXbuff - TXbuff;
+
+    if (RXbuff%BUFFER_SIZE + total <= BUFFER_SIZE) {
+        memcpy(&data[0], &pbuff[RXbuff%BUFFER_SIZE], total);
     }
+    else {
+        memcpy(&data[0], &pbuff[RXbuff%BUFFER_SIZE], BUFFER_SIZE - RXbuff%BUFFER_SIZE);
+        memcpy(&data[BUFFER_SIZE - RXbuff%BUFFER_SIZE], &pbuff[0], RXbuff%BUFFER_SIZE + total - BUFFER_SIZE);
+    }
+
     return total;  //the reset interval
 }
 
 
-//audio input (from Microphone)
+// audio input (from Microphone)
 qint64 MyAudio::writeData(const char *data, qint64 len)
 {
-    int total=0;
-    while (len > total)
-    {
-        memcpy(&pbuff[RXbuff%BUFFER_SIZE],&data[total], 2); //write 2Bytes into circular buffer(64K)
-        RXbuff+=2; //next 16bit buffer location
-        total+=2;  //next data location
+    if (RXbuff%BUFFER_SIZE + len <= BUFFER_SIZE) {
+        memcpy(&pbuff[RXbuff%BUFFER_SIZE], &data[0], len);
     }
-    return (total); //return total number of bytes received
+    else {
+        memcpy(&pbuff[RXbuff%BUFFER_SIZE], &data[0], BUFFER_SIZE - RXbuff%BUFFER_SIZE);
+        memcpy(&pbuff[0], &data[BUFFER_SIZE - RXbuff%BUFFER_SIZE], RXbuff%BUFFER_SIZE + len - BUFFER_SIZE);
+    }
+    RXbuff += len;
+    return len;
 }
 
 qint64 MyAudio::bytesAvailable() const{return 0;}
